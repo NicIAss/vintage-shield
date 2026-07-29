@@ -1,0 +1,87 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+async function loadWorker() {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  return worker;
+}
+
+function runtimeEnv() {
+  return {
+    ASSETS: {
+      fetch: async () => new Response("Not found", { status: 404 }),
+    },
+  };
+}
+
+function context() {
+  return {
+    waitUntil() {},
+    passThroughOnException() {},
+  };
+}
+
+test("server-renders the complete Vintage Shield dashboard", async () => {
+  const worker = await loadWorker();
+  const response = await worker.fetch(
+    new Request("http://localhost/", {
+      headers: { accept: "text/html" },
+    }),
+    runtimeEnv(),
+    context(),
+  );
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  const html = await response.text();
+  assert.match(html, /Vintage Shield/);
+  assert.match(html, /Public ban register/);
+  assert.match(html, /Community ban dashboard/);
+  assert.match(html, /Download complete JSON/);
+  assert.match(html, /Latest approved reports/);
+  assert.match(html, /Preview dataset/);
+  assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|taking shape/i);
+});
+
+test("exports approved entries in Vintage Story's native JSON shape", async () => {
+  const worker = await loadWorker();
+  const response = await worker.fetch(
+    new Request("http://localhost/api/export"),
+    runtimeEnv(),
+    context(),
+  );
+
+  assert.equal(response.status, 200);
+  assert.match(
+    response.headers.get("content-disposition") ?? "",
+    /public-banlist\.json/,
+  );
+  const rows = await response.json();
+  assert.ok(Array.isArray(rows));
+  assert.ok(rows.length > 0);
+  assert.deepEqual(
+    Object.keys(rows[0]).sort(),
+    [
+      "IssuedByPlayerName",
+      "PlayerName",
+      "PlayerUID",
+      "Reason",
+      "UntilDate",
+    ].sort(),
+  );
+});
+
+test("publishes a lightweight health endpoint", async () => {
+  const worker = await loadWorker();
+  const response = await worker.fetch(
+    new Request("http://localhost/api/health"),
+    runtimeEnv(),
+    context(),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.service, "vintage-shield");
+});
