@@ -60,7 +60,7 @@ const demoCases: PublicBan[] = [
     durationDays: 3650,
     status: "approved",
     actionTaken: true,
-    command: "/ban AshenRook 3650 days Repeated griefing after multiple warnings",
+    command: "/ban AshenRook 3650 day Repeated griefing after multiple warnings",
   },
   {
     id: "VS-1839",
@@ -74,7 +74,7 @@ const demoCases: PublicBan[] = [
     durationDays: 3650,
     status: "approved",
     actionTaken: true,
-    command: "/ban CopperWraith 3650 days Ban evasion after a confirmed inventory theft case",
+    command: "/ban CopperWraith 3650 day Ban evasion after a confirmed inventory theft case",
   },
   {
     id: "VS-1827",
@@ -88,7 +88,7 @@ const demoCases: PublicBan[] = [
     durationDays: 3650,
     status: "approved",
     actionTaken: true,
-    command: "/ban NightKiln 3650 days Malicious use of an exploit affecting server stability",
+    command: "/ban NightKiln 3650 day Malicious use of an exploit affecting server stability",
   },
   {
     id: "VS-1818",
@@ -102,7 +102,7 @@ const demoCases: PublicBan[] = [
     durationDays: 3650,
     status: "approved",
     actionTaken: false,
-    command: "/ban FalseSpring 3650 days Targeted harassment and repeated rule violations",
+    command: "/ban FalseSpring 3650 day Targeted harassment and repeated rule violations",
   },
 ];
 
@@ -159,7 +159,7 @@ export function requireBotAuth(request: Request): Response | null {
 }
 
 export function toPublicBan(row: BanCaseRow): PublicBan {
-  const command = `/ban ${row.player_name} ${row.duration_days} days ${row.public_reason}`;
+  const command = `/ban ${row.player_name} ${row.duration_days} day ${row.public_reason}`;
   return {
     id: row.id,
     playerName: row.player_name,

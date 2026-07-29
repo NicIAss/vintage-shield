@@ -39,12 +39,13 @@ The in-game handbook defines the ban command as:
 Vintage Shield generates commands such as:
 
 ```text
-/ban ExamplePlayer 30 days Confirmed griefing after multiple warnings
+/ban ExamplePlayer 30 day Confirmed griefing after multiple warnings
 ```
 
 The handbook accepts a number plus a time unit. Supported units include
 `minute`, `hour`, `day`, `week`, and `year`. The bot currently collects the
-duration in days, so generated commands use the `days` unit.
+duration as a number of days, but generated commands use the required singular
+`day` unit token. Vintage Story rejects plural unit tokens such as `days`.
 
 Vintage Story also provides:
 

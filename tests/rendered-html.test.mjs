@@ -43,7 +43,8 @@ test("server-renders the complete Vintage Shield dashboard", async () => {
   assert.match(html, /Latest approved reports/);
   assert.match(html, /\.pastemode multi/);
   assert.match(html, /DEMO DATA/);
-  assert.match(html, /\/ban AshenRook 3650 days/);
+  assert.match(html, /\/ban AshenRook 3650 day/);
+  assert.doesNotMatch(html, /\/ban [^<\n]+ \d+ days /);
   assert.doesNotMatch(html, /player-avatar|profile picture/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|taking shape/i);
 });
