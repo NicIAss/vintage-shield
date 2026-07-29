@@ -1,0 +1,11 @@
+.git
+.next
+.vinext
+dist
+node_modules
+work
+.wrangler
+.pnpm-store
+.env
+__pycache__
+*.pyc

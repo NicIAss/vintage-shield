@@ -13,16 +13,20 @@ class ShieldAPIError(RuntimeError):
 
 
 class ShieldAPI:
-    def __init__(self, base_url: str, api_key: str) -> None:
+    def __init__(self, base_url: str, api_key: str, admin_guild_id: int) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        self.admin_guild_id = admin_guild_id
         self.session: aiohttp.ClientSession | None = None
 
     async def start(self) -> None:
         timeout = aiohttp.ClientTimeout(total=20)
         self.session = aiohttp.ClientSession(
             timeout=timeout,
-            headers={"x-api-key": self.api_key},
+            headers={
+                "x-api-key": self.api_key,
+                "x-admin-guild-id": str(self.admin_guild_id),
+            },
         )
 
     async def close(self) -> None:

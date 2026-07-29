@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const authError = requireBotAuth(request);
   if (authError) return authError;
 
-  const db = getDatabase();
+  const db = await getDatabase();
   if (!db) {
     return Response.json({ error: "Database unavailable" }, { status: 503 });
   }

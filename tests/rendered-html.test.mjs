@@ -37,11 +37,14 @@ test("server-renders the complete Vintage Shield dashboard", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
   assert.match(html, /Vintage Shield/);
-  assert.match(html, /Public ban register/);
-  assert.match(html, /Community ban dashboard/);
-  assert.match(html, /Download complete JSON/);
+  assert.match(html, /PUBLIC BAN REGISTER/);
+  assert.match(html, /Ban register/);
+  assert.match(html, /Download complete list/);
   assert.match(html, /Latest approved reports/);
-  assert.match(html, /Preview dataset/);
+  assert.match(html, /\.pastemode multi/);
+  assert.match(html, /DEMO DATA/);
+  assert.match(html, /\/ban AshenRook 3650 days/);
+  assert.doesNotMatch(html, /player-avatar|profile picture/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|taking shape/i);
 });
 
@@ -84,4 +87,29 @@ test("publishes a lightweight health endpoint", async () => {
   const body = await response.json();
   assert.equal(body.ok, true);
   assert.equal(body.service, "vintage-shield");
+});
+
+test("rejects private API calls from any other Discord guild", async () => {
+  const worker = await loadWorker();
+  const response = await worker.fetch(
+    new Request("http://localhost/api/internal/reports", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": "test-secret",
+        "x-admin-guild-id": "999",
+      },
+      body: "{}",
+    }),
+    {
+      ...runtimeEnv(),
+      BOT_API_KEY: "test-secret",
+      ADMIN_GUILD_ID: "123",
+    },
+    context(),
+  );
+
+  assert.equal(response.status, 403);
+  const body = await response.json();
+  assert.match(body.error, /configured admin Discord server/i);
 });

@@ -11,7 +11,7 @@ export async function GET(request: Request, context: RouteContext) {
   const authError = requireBotAuth(request);
   if (authError) return authError;
 
-  const db = getDatabase();
+  const db = await getDatabase();
   if (!db) {
     return Response.json({ error: "Database unavailable" }, { status: 503 });
   }
@@ -40,7 +40,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const authError = requireBotAuth(request);
   if (authError) return authError;
 
-  const db = getDatabase();
+  const db = await getDatabase();
   if (!db) {
     return Response.json({ error: "Database unavailable" }, { status: 503 });
   }

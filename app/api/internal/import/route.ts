@@ -4,6 +4,7 @@ import {
   getDatabase,
   requireBotAuth,
 } from "@/lib/ban-service";
+import type { DatabaseStatement } from "@/lib/database";
 
 type ImportEntry = {
   PlayerUID?: string;
@@ -16,7 +17,7 @@ type ImportEntry = {
 export async function POST(request: Request) {
   const authError = requireBotAuth(request);
   if (authError) return authError;
-  const db = getDatabase();
+  const db = await getDatabase();
   if (!db) {
     return Response.json({ error: "Database unavailable" }, { status: 503 });
   }
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
   }
 
   const now = new Date().toISOString();
-  const statements: D1PreparedStatement[] = [];
+  const statements: DatabaseStatement[] = [];
   let accepted = 0;
   for (const raw of payload.entries) {
     const playerUid = cleanText(raw.PlayerUID, 128);

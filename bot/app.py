@@ -24,7 +24,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "")
 SHIELD_API_URL = os.getenv("SHIELD_API_URL", "http://localhost:3000")
 BOT_API_KEY = os.getenv("BOT_API_KEY", "")
 WEBSITE_URL = os.getenv("WEBSITE_URL", SHIELD_API_URL)
-DEV_GUILD_ID = int(os.getenv("DEV_GUILD_ID", "0") or 0)
+ADMIN_GUILD_ID = int(os.getenv("ADMIN_GUILD_ID", "0") or 0)
 
 REVIEW_PATTERN = re.compile(
     r"shield:(?P<action>confirm|deny):(?P<case_id>VS-[A-Z0-9]+)"
@@ -38,6 +38,7 @@ def require_environment() -> None:
             "DISCORD_TOKEN": DISCORD_TOKEN,
             "BOT_API_KEY": BOT_API_KEY,
             "SHIELD_API_URL": SHIELD_API_URL,
+            "ADMIN_GUILD_ID": ADMIN_GUILD_ID,
         }.items()
         if not value
     ]
@@ -141,6 +142,12 @@ class ReviewButton(
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id != ADMIN_GUILD_ID:
+            await interaction.response.send_message(
+                "This bot only accepts actions in its configured admin server.",
+                ephemeral=True,
+            )
+            return
         bot = cast("VintageShieldBot", interaction.client)
         await bot.handle_vote(interaction, self.case_id, self.action)
 
@@ -159,23 +166,37 @@ class ReviewView(discord.ui.View):
         )
 
 
+class AdminGuildTree(app_commands.CommandTree):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild_id == ADMIN_GUILD_ID:
+            return True
+        message = "This bot only works in its configured private admin server."
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+        return False
+
+
 class VintageShieldBot(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.default()
-        super().__init__(command_prefix=commands.when_mentioned, intents=intents)
-        self.api = ShieldAPI(SHIELD_API_URL, BOT_API_KEY)
+        super().__init__(
+            command_prefix=commands.when_mentioned,
+            intents=intents,
+            tree_cls=AdminGuildTree,
+        )
+        self.api = ShieldAPI(SHIELD_API_URL, BOT_API_KEY, ADMIN_GUILD_ID)
 
     async def setup_hook(self) -> None:
         await self.api.start()
         self.add_dynamic_items(ReviewButton)
-        if DEV_GUILD_ID:
-            guild = discord.Object(id=DEV_GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-            log.info("Synced commands to development guild %s", DEV_GUILD_ID)
-        else:
-            await self.tree.sync()
-            log.info("Synced global commands")
+        guild = discord.Object(id=ADMIN_GUILD_ID)
+        self.tree.copy_global_to(guild=guild)
+        await self.tree.sync(guild=guild)
+        self.tree.clear_commands(guild=None)
+        await self.tree.sync()
+        log.info("Synced commands only to admin guild %s", ADMIN_GUILD_ID)
 
     async def close(self) -> None:
         await self.api.close()
@@ -208,9 +229,9 @@ class VintageShieldBot(commands.Bot):
         action: Literal["confirm", "deny"],
         note: str = "",
     ) -> None:
-        if not interaction.guild_id:
+        if interaction.guild_id != ADMIN_GUILD_ID:
             await interaction.response.send_message(
-                "Voting is only available inside the admin server.",
+                "Voting is only available inside the configured admin server.",
                 ephemeral=True,
             )
             return
@@ -265,9 +286,9 @@ async def submit_report(
     duration_days: int,
     action_taken: bool,
 ) -> None:
-    if not interaction.guild:
+    if not interaction.guild or interaction.guild.id != ADMIN_GUILD_ID:
         await interaction.response.send_message(
-            "Use this command inside the private admin server.",
+            "Use this command inside the configured private admin server.",
             ephemeral=True,
         )
         return
@@ -453,7 +474,7 @@ async def ban_find(interaction: discord.Interaction, query: str) -> None:
             for ban in matches
         ]
         embed = discord.Embed(
-            title=f"Public ban search — {len(matches)} result(s)",
+            title=f"Public ban search: {len(matches)} result(s)",
             description="\n\n".join(lines),
             colour=status_colour("approved"),
             url=WEBSITE_URL,
@@ -484,8 +505,11 @@ async def ban_import(
     file: discord.Attachment,
     source_server: str | None = None,
 ) -> None:
-    if not interaction.guild_id:
-        await interaction.response.send_message("Use this in a server.", ephemeral=True)
+    if interaction.guild_id != ADMIN_GUILD_ID:
+        await interaction.response.send_message(
+            "Use this in the configured admin server.",
+            ephemeral=True,
+        )
         return
     await interaction.response.defer(ephemeral=True, thinking=True)
     if not file.filename.lower().endswith(".json") or file.size > 2_000_000:
@@ -556,8 +580,11 @@ async def shield_config(
     log_channel: discord.TextChannel | None = None,
     public_server_name: str | None = None,
 ) -> None:
-    if not interaction.guild:
-        await interaction.response.send_message("Use this in a server.", ephemeral=True)
+    if not interaction.guild or interaction.guild.id != ADMIN_GUILD_ID:
+        await interaction.response.send_message(
+            "Use this in the configured admin server.",
+            ephemeral=True,
+        )
         return
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:

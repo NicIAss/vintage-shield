@@ -1,184 +1,293 @@
 # Vintage Shield
 
-Vintage Shield is an English-first, community-reviewed public ban register for
-Vintage Story server administrators.
+Vintage Shield is an English public ban register and private Discord review bot
+for Vintage Story server administrators.
 
-The public website makes confirmed bans easy to search, copy as server commands,
-and download in Vintage Story's native JSON format. The private Discord bot is
-the only moderation input surface: it collects reports and evidence, notifies
-reviewers, records confirm/deny votes, and publishes a case only after the
-configured threshold is reached.
+The complete production stack runs on one Ubuntu VPS:
 
-## What is included
+- Caddy provides HTTPS and sends website traffic to the web container.
+- The Next.js website provides the public register, JSON export, and private
+  bot API.
+- PostgreSQL stores guild settings, cases, votes, and the audit log.
+- The Discord bot is the only input surface for reports and decisions.
 
-- Responsive public dashboard with search and source-server filtering
-- One-click `/ban [playername] [reason]` commands
-- Bulk command copying
+Only one Discord server can use the bot. The required `ADMIN_GUILD_ID` setting
+controls command registration, interaction checks, and private API access.
+
+## Main features
+
+- Compact admin panel with latest reports and copy-ready commands
 - Native `public-banlist.json` download
-- Public case details without private evidence or reviewer identities
-- Discord reports for suspicious players
-- Discord records for bans already issued on a server
-- Persistent Confirm and Deny buttons
+- Single-command copying
+- Deliberate bulk-copy confirmation with `.pastemode multi` instructions
+- Reports for suspicious players and already issued bans
+- Confirm and Deny review buttons
 - Configurable reviewer and notification roles
 - Configurable approval and denial thresholds
-- Case lookup, public-ban search, import, export, and revoke commands
-- Duplicate active-case protection
-- Private evidence and public-reason separation
-- Revocation, expiry, and audit history
-- Durable D1 database migrations
-- Docker-based VPS bot deployment
+- Private evidence separated from the public reason
+- Import, export, search, revoke, expiry, and audit history
+- One Ubuntu VPS deployment with Docker Compose, PostgreSQL, and automatic HTTPS
 
-## Moderation lifecycle
+## Correct Vintage Story commands
 
-1. An admin uses `/player-report` or `/ban-record` in the private Discord.
-2. The bot posts a review card and mentions the configured notification role.
-3. Members with the reviewer role confirm or deny the case.
-4. The decision threshold is evaluated after every distinct reviewer's vote.
-5. Approved, unexpired cases appear on the public website and in the JSON
-   export.
-6. Denied cases remain private. Revoked or expired cases disappear publicly but
-   remain in the audit history.
+The in-game handbook defines the ban command as:
 
-The public register is a shared signal. Each server owner still decides whether
-to apply a community ban.
+```text
+/ban <player name> <duration> <reason>
+```
 
-## Project layout
+Vintage Shield generates commands such as:
 
-| Path | Purpose |
-| --- | --- |
-| `app/` | Public dashboard and website/API routes |
-| `lib/ban-service.ts` | Public data mapping, JSON export, and API security |
-| `db/` and `drizzle/` | Durable database schema and migrations |
-| `bot/` | Discord bot, API client, and bot container |
-| `tests/` | Render, export, and health checks |
-| `.openai/hosting.json` | Sites database declaration |
+```text
+/ban ExamplePlayer 30 days Confirmed griefing after multiple warnings
+```
+
+The handbook accepts a number plus a time unit. Supported units include
+`minute`, `hour`, `day`, `week`, and `year`. The bot currently collects the
+duration in days, so generated commands use the `days` unit.
+
+Vintage Story also provides:
+
+```text
+.pastemode <single/multi>
+```
+
+Use `.pastemode multi` before pasting a multiline command list. Return to
+`.pastemode single` afterward.
+
+Important: a bulk list can ban many players immediately. The website does not
+copy bulk commands until an admin acknowledges the warning. Review every entry
+before pasting it into a live server.
 
 ## Discord commands
 
-| Command | Who can use it | Purpose |
-| --- | --- | --- |
-| `/player-report` | Admin community | Submit a suspicious player for review |
-| `/ban-record` | Admin community | Record a ban already issued by a server |
-| `/case` | Admin community | Inspect private case details and vote totals |
-| `/case-vote` | Reviewer role | Confirm or deny a pending case |
-| `/ban-find` | Admin community | Search the approved public register |
-| `/ban-export` | Admin community | Download `public-banlist.json` |
-| `/ban-import` | Manage Server | Import a native Vintage Story ban-list file |
-| `/ban-revoke` | Manage Server | Remove an approved case from public output |
-| `/shield-config` | Manage Server | Configure channels, roles, names, and thresholds |
+- `/player-report`: submit a suspicious player for review
+- `/ban-record`: record a ban that was already applied
+- `/case`: inspect private case details and vote totals
+- `/case-vote`: confirm or deny a pending case
+- `/ban-find`: search approved public bans
+- `/ban-export`: download `public-banlist.json`
+- `/ban-import`: import a native Vintage Story ban list
+- `/ban-revoke`: remove an approved case from public output
+- `/shield-config`: configure channels, roles, thresholds, and server name
 
-The review buttons survive bot restarts through Discord's dynamic component
-handling. A reviewer can also use `/case-vote` as a fallback.
+The commands are registered only in the Discord server identified by
+`ADMIN_GUILD_ID`. The bot removes global commands during startup. Button
+interactions and API calls from any other guild are rejected.
 
-## Local website development
+## Ubuntu VPS requirements
 
-Requirements:
+Use a supported 64-bit Ubuntu release. Ubuntu 24.04 LTS is a good default.
 
-- Node.js 22.13 or newer
-- pnpm 11
+You need:
 
-```bash
-pnpm install
-pnpm run db:generate
-pnpm run dev
+- A VPS with at least 2 GB RAM
+- A domain or subdomain
+- DNS access for that domain
+- Ports 22, 80, and 443 available
+- A Discord application and bot token
+- The numeric ID of the private admin Discord server
+
+Docker maintains the current Ubuntu installation steps at:
+
+https://docs.docker.com/engine/install/ubuntu/
+
+Caddy needs the domain to point at the VPS and ports 80 and 443 to be reachable.
+Its HTTPS requirements are documented at:
+
+https://caddyserver.com/docs/quick-starts/https
+
+## 1. Prepare DNS
+
+Create an `A` record for your chosen hostname and point it to the VPS IPv4
+address. Create an `AAAA` record only if the VPS has working public IPv6.
+
+Example:
+
+```text
+bans.example.com -> 203.0.113.10
 ```
 
-Open `http://localhost:3000`.
+Wait until the record resolves before starting Caddy.
 
-The local preview uses clearly labelled fictional records when D1 is not
-available. No sample player is inserted into the live database.
+## 2. Connect and prepare Ubuntu
 
-Verification:
+Connect over SSH:
 
 ```bash
-pnpm run build
-pnpm test
-pnpm exec tsc --noEmit
-python -m py_compile bot/api.py bot/app.py
+ssh your-user@your-vps-address
 ```
 
-## Recommended production setup
+Update the server and install basic tools:
 
-The recommended topology is:
+```bash
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y ca-certificates curl git ufw
+```
 
-- Website, API, and D1 database on OpenAI Sites
-- Discord bot on your VPS
+Allow SSH, HTTP, and HTTPS:
 
-This keeps the public service close to its managed database while the private
-Discord token stays on your own server. The bot communicates with the API using
-one long random shared secret.
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+sudo ufw status
+```
 
-### 1. Configure the website/API
+Docker warns that published container ports interact directly with its firewall
+rules. This project publishes only Caddy on ports 80 and 443. PostgreSQL and the
+web container stay on the private Compose network.
 
-Create a long random API key. For example:
+## 3. Install Docker Engine and Compose
+
+Remove conflicting packages if they are installed:
+
+```bash
+sudo apt remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc
+```
+
+Add Docker's official signing key and repository:
+
+```bash
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc" | sudo tee /etc/apt/sources.list.d/docker.sources
+sudo apt update
+```
+
+Install Docker Engine and the Compose plugin:
+
+```bash
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo docker run --rm hello-world
+```
+
+Optional: allow your user to run Docker without `sudo`:
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+Sign out and reconnect after changing group membership.
+
+## 4. Copy the project to the VPS
+
+Clone your repository or upload this folder:
+
+```bash
+git clone YOUR_REPOSITORY_URL vintage-shield
+cd vintage-shield
+```
+
+Create the private environment file:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+```
+
+Generate two different random secrets:
 
 ```bash
 openssl rand -hex 32
+openssl rand -hex 32
 ```
 
-Set these hosted runtime variables:
+Edit `.env`:
 
-```text
-BOT_API_KEY=<the generated secret>
-DEMO_MODE=false
+```bash
+nano .env
 ```
 
-Deploy the saved site version. The deployment applies the SQL migrations in
-`drizzle/`.
-
-### 2. Create the Discord application
-
-In the Discord Developer Portal:
-
-1. Create an application and add a bot.
-2. Reset/copy its token once and store it only in your VPS environment file.
-3. Under OAuth2 URL Generator, select `bot` and `applications.commands`.
-4. Grant View Channels, Send Messages, Embed Links, Attach Files, Read Message
-   History, and Use Application Commands.
-5. Invite the bot to the private admin server.
-
-The bot does not require Message Content or Server Members privileged intents.
-
-### 3. Start the bot on the VPS
-
-Install Docker Engine and the Docker Compose plugin. Clone/copy this project to
-the VPS, then create a `.env` file from `.env.example`:
+Required values:
 
 ```text
-DISCORD_TOKEN=<new Discord bot token>
-BOT_API_KEY=<same secret configured on the website>
-SHIELD_API_URL=https://your-published-site.example
-WEBSITE_URL=https://your-published-site.example
-DEV_GUILD_ID=
+DOMAIN=bans.example.com
+POSTGRES_DB=vintage_shield
+POSTGRES_USER=vintage_shield
+POSTGRES_PASSWORD=<first random secret>
+BOT_API_KEY=<second random secret>
+DISCORD_TOKEN=<Discord bot token>
+ADMIN_GUILD_ID=<private admin Discord server ID>
 LOG_LEVEL=INFO
 ```
 
-Start the service:
+Do not reuse the PostgreSQL password as the API key.
+
+## 5. Create and invite the Discord bot
+
+1. Open the Discord Developer Portal.
+2. Create an application and add a bot.
+3. Copy the token into `DISCORD_TOKEN`.
+4. In OAuth2 URL Generator, select `bot` and `applications.commands`.
+5. Grant View Channels, Send Messages, Embed Links, Attach Files, Read Message
+   History, and Use Application Commands.
+6. Invite the bot only to the private admin Discord server.
+
+The bot does not need Message Content or Server Members privileged intents.
+
+To get the server ID, enable Discord Developer Mode, right-click the server
+icon, and select Copy ID. Discord documents this process at:
+
+https://support-dev.discord.com/hc/en-us/articles/360028717192-Where-can-I-find-my-Application-Team-Server-ID
+
+## 6. Start the complete stack
+
+Build and start every service:
 
 ```bash
 docker compose up -d --build
-docker compose logs -f vintage-shield-bot
 ```
 
-`DEV_GUILD_ID` is optional. Setting it to the private Discord server ID makes
-slash-command changes appear immediately during testing. Leave it empty for
-global production commands.
+Check service state:
 
-### 4. Configure the Discord workflow
+```bash
+docker compose ps
+```
 
-Create the private review channel, reviewer role, and interested-admin
-notification role. Then run:
+Follow startup logs:
+
+```bash
+docker compose logs -f caddy web bot
+```
+
+The first start creates the PostgreSQL schema automatically. Caddy requests and
+renews the HTTPS certificate after DNS and ports are correct.
+
+Open:
 
 ```text
-/shield-config
+https://your-domain.example
 ```
 
-Select the channel and roles, then choose the approval and denial thresholds.
-Two independent reviewers is a sensible starting point.
+## 7. Configure the Discord workflow
 
-## Import and export format
+Create these items in the private admin Discord:
 
-The public download deliberately preserves Vintage Story's field names:
+- A private review channel
+- A reviewer role
+- A notification role for interested admins
+- An optional private log channel
+
+Run `/shield-config` in the configured admin server. Select the channels and
+roles, then set the approval and denial thresholds. Two independent reviewers
+is a sensible starting point.
+
+The public server name is shown as the source on the website and in case
+details.
+
+## Import and export
+
+The website and `/ban-export` provide Vintage Story's native JSON shape:
 
 ```json
 [
@@ -192,46 +301,118 @@ The public download deliberately preserves Vintage Story's field names:
 ]
 ```
 
-`/ban-import` accepts this same array format. Invalid rows are skipped, the
-import is capped at 500 rows, and an imported active UID replaces an older
+`/ban-import` accepts the same array format. A single import is limited to 500
+rows. Invalid rows are skipped. An imported active UID replaces an older
 approved entry.
 
-## Security and privacy
+## Routine operation
 
-- Never commit `.env` files, Discord tokens, or `BOT_API_KEY`.
-- Use a different secret for the website API and the Discord bot token.
-- Private evidence is never returned by public endpoints.
-- Public write operations require `x-api-key`.
-- Reviewer permissions are checked in Discord before a vote reaches the API.
-- Import and revoke operations require Discord's Manage Server permission.
-- Rotate any token that was ever hard-coded in an older prototype before using
-  this project.
-- Keep public reasons factual and concise. Avoid publishing personal
-  information, private messages, IP addresses, or raw logs.
+View logs:
 
-## Operating notes
+```bash
+docker compose logs -f bot
+docker compose logs -f web
+docker compose logs -f caddy
+docker compose logs -f postgres
+```
 
-- `DEMO_MODE=true` always shows fictional preview data and should not be used for
-  the live community register.
-- Expired and revoked entries are automatically excluded from the website and
-  export.
-- Vote changes are allowed while a case is pending; each reviewer has one
-  current vote.
-- After approval or denial, the Discord review buttons are disabled.
-- Case IDs use a short `VS-XXXXXXXX` format for easy Discord discussion.
+Restart one service:
 
-## Hosting everything on one VPS
+```bash
+docker compose restart bot
+```
 
-The current data layer is intentionally D1-backed. For a single-machine
-deployment of both the website and bot, the safe production path is to add a
-PostgreSQL adapter and run the web service, bot, database, and reverse proxy
-together. Do not expose a Wrangler/Miniflare development database as a
-production service.
+Update the application:
 
-If you choose that topology later, migrate the existing route contracts rather
-than changing the bot: the bot already talks to the website through stable HTTP
-endpoints.
+```bash
+git pull
+docker compose up -d --build
+docker image prune -f
+```
 
-## Legal note
+Check the public health endpoint:
+
+```bash
+curl -fsS https://your-domain.example/api/health
+```
+
+## Backups
+
+Create a database backup:
+
+```bash
+mkdir -p backups
+docker compose exec -T postgres pg_dump -U vintage_shield vintage_shield | gzip > backups/vintage-shield.sql.gz
+```
+
+Copy backups to a different machine or storage provider. A backup stored only
+on the same VPS does not protect against VPS loss.
+
+Restore into an empty database:
+
+```bash
+gzip -dc backups/vintage-shield.sql.gz | docker compose exec -T postgres psql -U vintage_shield vintage_shield
+```
+
+Stop the stack without deleting data:
+
+```bash
+docker compose down
+```
+
+Do not add `-v` unless you intentionally want to delete the PostgreSQL and Caddy
+volumes.
+
+## Security notes
+
+- Never commit `.env`, Discord tokens, database passwords, or `BOT_API_KEY`.
+- Keep PostgreSQL private. This Compose file does not publish port 5432.
+- Use one dedicated Discord guild ID in `ADMIN_GUILD_ID`.
+- Private API routes require both the API key and the configured guild ID.
+- Reviewer permissions are checked before votes are accepted.
+- Import, revoke, and configuration commands require Manage Server permission.
+- Private evidence is never returned by public API routes.
+- Keep public reasons factual and concise.
+- Do not publish IP addresses, private messages, personal information, or raw
+  private logs.
+- Rotate any token that was present in an older prototype.
+
+## Troubleshooting
+
+If HTTPS does not start:
+
+```bash
+docker compose logs caddy
+```
+
+Confirm the domain points to the VPS and that ports 80 and 443 are reachable.
+
+If the bot shows no commands, verify `ADMIN_GUILD_ID`, restart the bot, and
+check:
+
+```bash
+docker compose logs bot
+```
+
+If the website cannot reach PostgreSQL:
+
+```bash
+docker compose ps
+docker compose logs postgres web
+```
+
+If you change the PostgreSQL password after the volume was created, update the
+database role too or recreate the database intentionally. Changing only `.env`
+does not change an existing PostgreSQL role password.
+
+## Project layout
+
+- `app/`: public dashboard and API routes
+- `lib/`: public data mapping and database adapters
+- `bot/`: Discord bot and API client
+- `deploy/`: Caddy and PostgreSQL production configuration
+- `Dockerfile`: production website image
+- `docker-compose.yml`: complete Ubuntu VPS stack
+- `tests/`: rendering, export, and health checks
 
 Vintage Shield is a community project and is not affiliated with Anego Studios.
