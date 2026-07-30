@@ -1,3 +1,5 @@
+name: vintage-shield
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -45,7 +47,10 @@ services:
     expose:
       - "3000"
     networks:
-      - internal
+      internal:
+      proxy:
+        aliases:
+          - vintage-shield-web
 
   bot:
     build:
@@ -69,29 +74,12 @@ services:
     networks:
       - internal
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    environment:
-      DOMAIN: ${DOMAIN}
-    depends_on:
-      web:
-        condition: service_healthy
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - internal
-
 networks:
   internal:
+  proxy:
+    external: true
+    name: web-proxy
 
 volumes:
   postgres_data:
-  caddy_data:
-  caddy_config:
+    name: vintage-shield-postgres-data

@@ -1,0 +1,29 @@
+name: vps-proxy
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      VINTAGE_SHIELD_DOMAIN: ${VINTAGE_SHIELD_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: web-proxy
+
+volumes:
+  caddy_data:
+    name: vps-caddy-data
+  caddy_config:
+    name: vps-caddy-config

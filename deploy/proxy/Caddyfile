@@ -1,6 +1,9 @@
-{$DOMAIN} {
+# BEGIN vintage-shield
+{$VINTAGE_SHIELD_DOMAIN} {
 	encode zstd gzip
-	reverse_proxy web:3000
+	@privateApi path /api/internal/*
+	respond @privateApi 404
+	reverse_proxy vintage-shield-web:3000
 
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -10,3 +13,4 @@
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 }
+# END vintage-shield

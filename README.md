@@ -3,62 +3,193 @@
 Vintage Shield is an English public ban register and private Discord review bot
 for Vintage Story server administrators.
 
-The complete production stack runs on one Ubuntu VPS:
+The Discord bot is the only input surface. It accepts commands only from one
+configured private admin Discord server. Approved bans appear on the public
+website, where admins can copy individual commands or download the complete
+native JSON ban list.
 
-- Caddy provides HTTPS and sends website traffic to the web container.
-- The Next.js website provides the public register, JSON export, and private
-  bot API.
-- PostgreSQL stores guild settings, cases, votes, and the audit log.
-- The Discord bot is the only input surface for reports and decisions.
+## Quick Ubuntu installation
 
-Only one Discord server can use the bot. The required `ADMIN_GUILD_ID` setting
-controls command registration, interaction checks, and private API access.
+You need:
 
-## Main features
+- A supported 64-bit Ubuntu VPS
+- A domain or subdomain pointing to the VPS
+- Ports 80 and 443 available
+- A Discord bot token
+- The numeric ID of the private admin Discord server
 
-- Compact admin panel with latest reports and copy-ready commands
-- Native `public-banlist.json` download
-- Single-command copying
-- Deliberate bulk-copy confirmation with `.pastemode multi` instructions
-- Reports for suspicious players and already issued bans
-- Confirm and Deny review buttons
-- Configurable reviewer and notification roles
-- Configurable approval and denial thresholds
-- Private evidence separated from the public reason
-- Import, export, search, revoke, expiry, and audit history
-- One Ubuntu VPS deployment with Docker Compose, PostgreSQL, and automatic HTTPS
+Upload or clone this project onto the VPS, open its directory, and run:
 
-## Correct Vintage Story commands
-
-The in-game handbook defines the ban command as:
-
-```text
-/ban <player name> <duration> <reason>
+```bash
+sudo bash deploy/install-ubuntu.sh
 ```
 
-Vintage Shield generates commands such as:
+The installer asks for only three values:
 
-```text
-/ban ExamplePlayer 30 day Confirmed griefing after multiple warnings
+1. The public domain or subdomain, such as `bans.example.com`
+2. The private Discord server ID
+3. The Discord bot token
+
+It installs Docker when needed, generates all internal credentials, creates the
+database volume, builds the website and bot, starts the shared HTTPS proxy, and
+validates the configuration.
+
+Rerun the installer later with the existing settings:
+
+```bash
+sudo bash deploy/install-ubuntu.sh
 ```
 
-The handbook accepts a number plus a time unit. Supported units include
-`minute`, `hour`, `day`, `week`, and `year`. The bot currently collects the
-duration as a number of days, but generated commands use the required singular
-`day` unit token. Vintage Story rejects plural unit tokens such as `days`.
+Change the domain, Discord server ID, or bot token:
 
-Vintage Story also provides:
-
-```text
-.pastemode <single/multi>
+```bash
+sudo bash deploy/install-ubuntu.sh --reconfigure
 ```
 
-Use `.pastemode multi` before pasting a multiline command list. Return to
-`.pastemode single` afterward.
+Reconfiguration keeps the existing PostgreSQL password and private API key so
+the database connection does not break.
 
-Important: a bulk list can ban many players immediately. The website does not
-copy bulk commands until an admin acknowledges the warning. Review every entry
-before pasting it into a live server.
+## Why there is an API key
+
+`BOT_API_KEY` is not an external service key. It is a random internal password
+shared by the Discord bot and the website API.
+
+The bot sends reports, votes, imports, and configuration changes to the website
+API. The key proves that those requests came from this bot. The configured
+Discord server ID is checked as well, and the public proxy rejects
+`/api/internal/*` requests. The installer creates the key and gives the same
+value to both containers automatically. You never need to enter it.
+
+## Why PostgreSQL has a password
+
+The website needs credentials to connect to PostgreSQL. The installer generates
+a separate random password and builds the database connection automatically.
+PostgreSQL is not published on a public VPS port, so only containers on the
+private Docker network can reach it.
+
+The password and API key add basic protection at no maintenance cost. You do not
+need to manage them manually.
+
+## Where data and secrets are stored
+
+- Project settings and generated secrets: `.env`
+- `.env` permissions: owner read and write only, mode `600`
+- PostgreSQL data: Docker volume `vintage-shield-postgres-data`
+- HTTPS certificates: Docker volumes `vps-caddy-data` and `vps-caddy-config`
+- Shared proxy files: `/opt/vps-proxy`
+
+The database remains on the VPS across container rebuilds and normal restarts.
+Do not run `docker compose down -v`, because `-v` intentionally deletes named
+volumes.
+
+## DNS
+
+Create an `A` record for the selected subdomain and point it to the VPS IPv4
+address. Create an `AAAA` record only if the VPS has working public IPv6.
+
+Example:
+
+```text
+bans.example.com -> 203.0.113.10
+```
+
+Caddy obtains and renews the HTTPS certificate after DNS points to the VPS and
+ports 80 and 443 are reachable.
+
+The installer does not change your firewall. If UFW is enabled, allow SSH,
+HTTP, and HTTPS:
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw status
+```
+
+## Hosting more websites on the same VPS
+
+This setup is ready for multiple domains. One central Caddy container owns
+ports 80 and 443. Vintage Shield and future websites join the external
+`web-proxy` Docker network.
+
+For another Docker website:
+
+1. Attach its web service to the external `web-proxy` network.
+2. Give the service a unique network alias, such as `portfolio-web`.
+3. Add its domain to `/opt/vps-proxy/Caddyfile`.
+4. Validate and reload Caddy.
+
+Example network section for another Compose project:
+
+```yaml
+services:
+  web:
+    networks:
+      proxy:
+        aliases:
+          - portfolio-web
+
+networks:
+  proxy:
+    external: true
+    name: web-proxy
+```
+
+Example additional Caddy site:
+
+```caddyfile
+portfolio.example.com {
+	reverse_proxy portfolio-web:3000
+}
+```
+
+Validate and reload the shared proxy:
+
+```bash
+sudo docker compose \
+  --env-file /opt/vps-proxy/.env \
+  -f /opt/vps-proxy/docker-compose.yml \
+  exec -T caddy caddy validate --config /etc/caddy/Caddyfile
+
+sudo docker compose \
+  --env-file /opt/vps-proxy/.env \
+  -f /opt/vps-proxy/docker-compose.yml \
+  exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+Your two existing root domains and any subdomains can all point to the same VPS
+IP. Caddy chooses the correct website from the requested hostname.
+
+## Discord setup
+
+1. Open the Discord Developer Portal.
+2. Create an application and add a bot.
+3. Reset or reveal the bot token and use it during installation.
+4. In the OAuth2 URL Generator, select `bot` and `applications.commands`.
+5. Grant View Channels, Send Messages, Embed Links, Attach Files, Read Message
+   History, and Use Application Commands.
+6. Invite the bot only to the private admin Discord server.
+
+The bot does not need the Message Content or Server Members privileged intents.
+
+To copy the server ID, enable Discord Developer Mode, right-click the server
+icon, and select Copy Server ID.
+
+The `ADMIN_GUILD_ID` value limits command registration, button interactions, and
+private API writes to this one Discord server.
+
+## Configure the admin workflow
+
+Create these items in the private admin Discord:
+
+- A private review channel
+- A reviewer role
+- A notification role for interested admins
+- An optional private log channel
+
+Run `/shield-config` in the configured Discord server. Select the channels and
+roles, then set the approval and denial thresholds. Two independent reviewers
+is a sensible starting point.
 
 ## Discord commands
 
@@ -72,219 +203,36 @@ before pasting it into a live server.
 - `/ban-revoke`: remove an approved case from public output
 - `/shield-config`: configure channels, roles, thresholds, and server name
 
-The commands are registered only in the Discord server identified by
-`ADMIN_GUILD_ID`. The bot removes global commands during startup. Button
-interactions and API calls from any other guild are rejected.
+The bot removes global commands during startup. Commands from any other Discord
+server are rejected.
 
-## Ubuntu VPS requirements
+## Vintage Story ban commands
 
-Use a supported 64-bit Ubuntu release. Ubuntu 24.04 LTS is a good default.
-
-You need:
-
-- A VPS with at least 2 GB RAM
-- A domain or subdomain
-- DNS access for that domain
-- Ports 22, 80, and 443 available
-- A Discord application and bot token
-- The numeric ID of the private admin Discord server
-
-Docker maintains the current Ubuntu installation steps at:
-
-https://docs.docker.com/engine/install/ubuntu/
-
-Caddy needs the domain to point at the VPS and ports 80 and 443 to be reachable.
-Its HTTPS requirements are documented at:
-
-https://caddyserver.com/docs/quick-starts/https
-
-## 1. Prepare DNS
-
-Create an `A` record for your chosen hostname and point it to the VPS IPv4
-address. Create an `AAAA` record only if the VPS has working public IPv6.
-
-Example:
+The in-game syntax is:
 
 ```text
-bans.example.com -> 203.0.113.10
+/ban <player name> <duration> <reason>
 ```
 
-Wait until the record resolves before starting Caddy.
-
-## 2. Connect and prepare Ubuntu
-
-Connect over SSH:
-
-```bash
-ssh your-user@your-vps-address
-```
-
-Update the server and install basic tools:
-
-```bash
-sudo apt update
-sudo apt upgrade -y
-sudo apt install -y ca-certificates curl git ufw
-```
-
-Allow SSH, HTTP, and HTTPS:
-
-```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
-sudo ufw status
-```
-
-Docker warns that published container ports interact directly with its firewall
-rules. This project publishes only Caddy on ports 80 and 443. PostgreSQL and the
-web container stay on the private Compose network.
-
-## 3. Install Docker Engine and Compose
-
-Remove conflicting packages if they are installed:
-
-```bash
-sudo apt remove -y docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc
-```
-
-Add Docker's official signing key and repository:
-
-```bash
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-echo "Types: deb
-URIs: https://download.docker.com/linux/ubuntu
-Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
-Components: stable
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/docker.asc" | sudo tee /etc/apt/sources.list.d/docker.sources
-sudo apt update
-```
-
-Install Docker Engine and the Compose plugin:
-
-```bash
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo systemctl enable --now docker
-sudo docker run --rm hello-world
-```
-
-Optional: allow your user to run Docker without `sudo`:
-
-```bash
-sudo usermod -aG docker "$USER"
-```
-
-Sign out and reconnect after changing group membership.
-
-## 4. Copy the project to the VPS
-
-Clone your repository or upload this folder:
-
-```bash
-git clone YOUR_REPOSITORY_URL vintage-shield
-cd vintage-shield
-```
-
-Create the private environment file:
-
-```bash
-cp .env.example .env
-chmod 600 .env
-```
-
-Generate two different random secrets:
-
-```bash
-openssl rand -hex 32
-openssl rand -hex 32
-```
-
-Edit `.env`:
-
-```bash
-nano .env
-```
-
-Required values:
+Vintage Shield generates commands such as:
 
 ```text
-DOMAIN=bans.example.com
-POSTGRES_DB=vintage_shield
-POSTGRES_USER=vintage_shield
-POSTGRES_PASSWORD=<first random secret>
-BOT_API_KEY=<second random secret>
-DISCORD_TOKEN=<Discord bot token>
-ADMIN_GUILD_ID=<private admin Discord server ID>
-LOG_LEVEL=INFO
+/ban ExamplePlayer 30 day Confirmed griefing after multiple warnings
 ```
 
-Do not reuse the PostgreSQL password as the API key.
+Supported time units include `minute`, `hour`, `day`, `week`, and `year`.
+Vintage Story expects a singular time unit token, even when the number is
+greater than one.
 
-## 5. Create and invite the Discord bot
-
-1. Open the Discord Developer Portal.
-2. Create an application and add a bot.
-3. Copy the token into `DISCORD_TOKEN`.
-4. In OAuth2 URL Generator, select `bot` and `applications.commands`.
-5. Grant View Channels, Send Messages, Embed Links, Attach Files, Read Message
-   History, and Use Application Commands.
-6. Invite the bot only to the private admin Discord server.
-
-The bot does not need Message Content or Server Members privileged intents.
-
-To get the server ID, enable Discord Developer Mode, right-click the server
-icon, and select Copy ID. Discord documents this process at:
-
-https://support-dev.discord.com/hc/en-us/articles/360028717192-Where-can-I-find-my-Application-Team-Server-ID
-
-## 6. Start the complete stack
-
-Build and start every service:
-
-```bash
-docker compose up -d --build
-```
-
-Check service state:
-
-```bash
-docker compose ps
-```
-
-Follow startup logs:
-
-```bash
-docker compose logs -f caddy web bot
-```
-
-The first start creates the PostgreSQL schema automatically. Caddy requests and
-renews the HTTPS certificate after DNS and ports are correct.
-
-Open:
+For multiple command lines, Vintage Story provides:
 
 ```text
-https://your-domain.example
+.pastemode multi
 ```
 
-## 7. Configure the Discord workflow
-
-Create these items in the private admin Discord:
-
-- A private review channel
-- A reviewer role
-- A notification role for interested admins
-- An optional private log channel
-
-Run `/shield-config` in the configured admin server. Select the channels and
-roles, then set the approval and denial thresholds. Two independent reviewers
-is a sensible starting point.
-
-The public server name is shown as the source on the website and in case
-details.
+Return to `.pastemode single` afterward. A bulk list can ban many players
+immediately, so the website requires a confirmation before copying all
+commands. Review every entry before pasting it into a live server.
 
 ## Import and export
 
@@ -306,114 +254,126 @@ The website and `/ban-export` provide Vintage Story's native JSON shape:
 rows. Invalid rows are skipped. An imported active UID replaces an older
 approved entry.
 
-## Routine operation
+## Routine commands
 
-View logs:
+Check application services:
 
 ```bash
-docker compose logs -f bot
-docker compose logs -f web
-docker compose logs -f caddy
-docker compose logs -f postgres
+sudo docker compose ps
 ```
 
-Restart one service:
+View application logs:
 
 ```bash
-docker compose restart bot
+sudo docker compose logs -f web bot postgres
 ```
 
-Update the application:
+View proxy logs:
 
 ```bash
-git pull
-docker compose up -d --build
-docker image prune -f
+sudo docker compose \
+  --env-file /opt/vps-proxy/.env \
+  -f /opt/vps-proxy/docker-compose.yml \
+  logs -f caddy
+```
+
+Restart the bot:
+
+```bash
+sudo docker compose restart bot
+```
+
+Rebuild after updating project files:
+
+```bash
+sudo docker compose up -d --build
 ```
 
 Check the public health endpoint:
 
 ```bash
-curl -fsS https://your-domain.example/api/health
+curl -fsS https://bans.example.com/api/health
 ```
 
-## Backups
+## Optional database backup
 
-Create a database backup:
+Create a compressed backup:
 
 ```bash
 mkdir -p backups
-docker compose exec -T postgres pg_dump -U vintage_shield vintage_shield | gzip > backups/vintage-shield.sql.gz
+sudo docker compose exec -T postgres \
+  pg_dump -U vintage_shield vintage_shield \
+  | gzip > backups/vintage-shield.sql.gz
 ```
 
-Copy backups to a different machine or storage provider. A backup stored only
-on the same VPS does not protect against VPS loss.
+A database backup on the same VPS helps with accidental changes, but does not
+protect against total VPS loss.
 
 Restore into an empty database:
 
 ```bash
-gzip -dc backups/vintage-shield.sql.gz | docker compose exec -T postgres psql -U vintage_shield vintage_shield
+gzip -dc backups/vintage-shield.sql.gz \
+  | sudo docker compose exec -T postgres \
+    psql -U vintage_shield vintage_shield
 ```
-
-Stop the stack without deleting data:
-
-```bash
-docker compose down
-```
-
-Do not add `-v` unless you intentionally want to delete the PostgreSQL and Caddy
-volumes.
 
 ## Security notes
 
 - Never commit `.env`, Discord tokens, database passwords, or `BOT_API_KEY`.
-- Keep PostgreSQL private. This Compose file does not publish port 5432.
-- Use one dedicated Discord guild ID in `ADMIN_GUILD_ID`.
-- Private API routes require both the API key and the configured guild ID.
+- PostgreSQL is not exposed on port 5432.
+- Private API writes require the API key and configured Discord server ID.
 - Reviewer permissions are checked before votes are accepted.
-- Import, revoke, and configuration commands require Manage Server permission.
 - Private evidence is never returned by public API routes.
+- Import, revoke, and configuration commands require Manage Server permission.
 - Keep public reasons factual and concise.
 - Do not publish IP addresses, private messages, personal information, or raw
   private logs.
-- Rotate any token that was present in an older prototype.
 
 ## Troubleshooting
 
-If HTTPS does not start:
+If HTTPS does not start, confirm that DNS points to the VPS, ports 80 and 443
+are reachable, and no other host process owns those ports. Then check:
 
 ```bash
-docker compose logs caddy
+sudo docker compose \
+  --env-file /opt/vps-proxy/.env \
+  -f /opt/vps-proxy/docker-compose.yml \
+  logs caddy
 ```
 
-Confirm the domain points to the VPS and that ports 80 and 443 are reachable.
-
-If the bot shows no commands, verify `ADMIN_GUILD_ID`, restart the bot, and
-check:
+If the bot shows no commands:
 
 ```bash
-docker compose logs bot
+sudo docker compose logs bot
+```
+
+Verify the `ADMIN_GUILD_ID`, then reconfigure if needed:
+
+```bash
+sudo bash deploy/install-ubuntu.sh --reconfigure
 ```
 
 If the website cannot reach PostgreSQL:
 
 ```bash
-docker compose ps
-docker compose logs postgres web
+sudo docker compose ps
+sudo docker compose logs postgres web
 ```
 
-If you change the PostgreSQL password after the volume was created, update the
-database role too or recreate the database intentionally. Changing only `.env`
-does not change an existing PostgreSQL role password.
+Changing only the PostgreSQL password in `.env` does not change an existing
+database role password. The installer avoids this issue by preserving the
+generated password during reconfiguration.
 
 ## Project layout
 
 - `app/`: public dashboard and API routes
 - `lib/`: public data mapping and database adapters
 - `bot/`: Discord bot and API client
-- `deploy/`: Caddy and PostgreSQL production configuration
+- `deploy/install-ubuntu.sh`: automated Ubuntu installer
+- `deploy/proxy/`: reusable central Caddy proxy templates
+- `deploy/postgres-init.sql`: PostgreSQL schema
 - `Dockerfile`: production website image
-- `docker-compose.yml`: complete Ubuntu VPS stack
+- `docker-compose.yml`: website, bot, and database services
 - `tests/`: rendering, export, and health checks
 
 Vintage Shield is a community project and is not affiliated with Anego Studios.
